@@ -33,6 +33,9 @@ function New-RegistryBackup {
     }
 
     $keys = $keysByLevel[$Level]
+    if ($null -eq $keys) {
+        throw "[FALLO] Nivel de backup invalido | Niveles validos: L1, L2, L3 | Recibido: $Level"
+    }
     $backupFiles = @()
 
     for ($i = 0; $i -lt $keys.Count; $i++) {
