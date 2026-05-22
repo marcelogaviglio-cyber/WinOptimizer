@@ -14,7 +14,11 @@ function Invoke-DriverUpdate {
 
     Write-Log -Module "DRIVERS" -Message "Iniciando escaneo de drivers via Windows Update..."
     $scanOutput = & pnputil /scan-devices 2>&1
-    Write-Log -Module "DRIVERS" -Message "pnputil: $($scanOutput -join ' ')"
+    if ($LASTEXITCODE -ne 0) {
+        Write-Log -Module "DRIVERS" -Message "[FALLO] pnputil fallo con codigo $LASTEXITCODE | $($scanOutput -join ' ')"
+    } else {
+        Write-Log -Module "DRIVERS" -Message "pnputil: $($scanOutput -join ' ')"
+    }
 
     $updated = Get-PnpDevice -ErrorAction SilentlyContinue |
         Where-Object { $_.Status -eq "OK" -and $_.Present -eq $true }

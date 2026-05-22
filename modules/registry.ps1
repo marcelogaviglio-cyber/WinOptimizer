@@ -42,8 +42,8 @@ function Invoke-RegistryLevel1 {
 
 function Invoke-RegistryLevel2 {
     $desktopPath = "HKCU:\Control Panel\Desktop"
-    Set-ItemProperty -Path $desktopPath -Name "WaitToKillAppTimeout" -Value "5000" -Type String
-    Set-ItemProperty -Path $desktopPath -Name "HungAppTimeout" -Value "3000" -Type String
+    Set-ItemProperty -Path $desktopPath -Name "WaitToKillAppTimeout" -Value 5000 -Type DWord
+    Set-ItemProperty -Path $desktopPath -Name "HungAppTimeout" -Value 3000 -Type DWord
     Write-Log -Module "REG-L2" -Message "Timeouts ajustados: WaitToKillApp=5000ms, HungApp=3000ms"
 
     $controlPath = "HKLM:\SYSTEM\CurrentControlSet\Control"
@@ -92,6 +92,10 @@ function Invoke-RegistryLevel3 {
 
 function Invoke-RegistryFix {
     param([int]$Level)
+
+    if ($Level -notin @(1, 2, 3)) {
+        throw "[FALLO] Nivel de registro invalido | Niveles validos: 1, 2, 3 | Recibido: $Level"
+    }
 
     Write-Log -Module "REG-L$Level" -Message "Iniciando nivel $Level — creando backup..."
     New-RegistryBackup -Level "L$Level"
