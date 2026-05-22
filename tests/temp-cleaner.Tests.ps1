@@ -7,7 +7,7 @@ Describe "Get-BrowserCachePaths" {
     It "returns only paths that exist on disk" {
         $paths = Get-BrowserCachePaths
         foreach ($p in $paths) {
-            Test-Path $p | Should Be $true
+            Test-Path $p | Should -Be $true
         }
     }
 }
@@ -25,14 +25,14 @@ Describe "Remove-DirectoryContents" {
         New-Item -ItemType File -Path "$dir\b.tmp" | Out-Null
 
         $result = Remove-DirectoryContents -Path $dir
-        $result.Files | Should Be 2
-        ($result.Bytes -ge 0) | Should Be $true
-        (Get-ChildItem $dir -File).Count | Should Be 0
+        $result.Files | Should -Be 2
+        $result.Bytes | Should -BeGreaterOrEqual 0
+        (Get-ChildItem $dir -File).Count | Should -Be 0
     }
 
     It "returns 0 files when directory does not exist" {
         $result = Remove-DirectoryContents -Path "C:\nonexistent\path\xyz123"
-        $result.Files | Should Be 0
-        $result.Bytes | Should Be 0
+        $result.Files | Should -Be 0
+        $result.Bytes | Should -Be 0
     }
 }
