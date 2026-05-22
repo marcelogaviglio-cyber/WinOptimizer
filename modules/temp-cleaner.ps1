@@ -65,55 +65,86 @@ function Remove-DirectoryContents {
 }
 
 function Invoke-TempCleaner {
-    <#
-    .SYNOPSIS
-    Orchestrates cleanup of system temp directories and browser caches.
-
-    .PARAMETER Interactive
-    If $true, prompts user to empty Recycle Bin. If $false, skips the prompt.
-    Default: $true
-
-    .OUTPUTS
-    None (logs results via Write-Log)
-    #>
     param([bool]$Interactive = $true)
 
+    $results  = @()
     $totalFiles = 0
     $totalBytes = 0
 
-    # System temp paths
     $sysPaths = @(
-        $env:TEMP,
-        "C:\Windows\Temp",
-        "C:\Windows\SoftwareDistribution\Download",
-        "$env:LOCALAPPDATA\Microsoft\Windows\Explorer"
+        @{ Label = "Temp usuario";         Path = $env:TEMP },
+        @{ Label = "Temp Windows";         Path = "C:\Windows\Temp" },
+        @{ Label = "Cache Windows Update"; Path = "C:\Windows\SoftwareDistribution\Download" },
+        @{ Label = "Cache miniaturas";     Path = "$env:LOCALAPPDATA\Microsoft\Windows\Explorer" }
     )
 
-    foreach ($path in $sysPaths) {
-        $result = Remove-DirectoryContents -Path $path
-        $totalFiles += $result.Files
-        $totalBytes += $result.Bytes
-        Write-Log -Module "TEMP" -Message "$path — $($result.Files) archivos"
+    foreach ($p in $sysPaths) {
+        $r = Remove-DirectoryContents -Path $p.Path
+        $totalFiles += $r.Files; $totalBytes += $r.Bytes
+        $sizeMB = [math]::Round($r.Bytes / 1MB, 1)
+        $results += [PSCustomObject]@{
+            Label  = $p.Label
+            Status = "OK"
+            Detail = "$($r.Files) archivos eliminados ($sizeMB MB)"
+        }
+        Write-Log -Module "TEMP" -Message "$($p.Path) — $($r.Files) archivos"
     }
 
-    # Browser caches
     foreach ($path in (Get-BrowserCachePaths)) {
-        $result = Remove-DirectoryContents -Path $path
-        $totalFiles += $result.Files
-        $totalBytes += $result.Bytes
-        Write-Log -Module "TEMP" -Message "Cache navegador: $($result.Files) archivos"
+        $r = Remove-DirectoryContents -Path $path
+        $totalFiles += $r.Files; $totalBytes += $r.Bytes
+        $sizeMB = [math]::Round($r.Bytes / 1MB, 1)
+        $results += [PSCustomObject]@{
+            Label  = "Cache navegador"
+            Status = "OK"
+            Detail = "$($r.Files) archivos eliminados ($sizeMB MB)"
+        }
+        Write-Log -Module "TEMP" -Message "Cache navegador: $($r.Files) archivos"
     }
 
-    # Recycle bin (interactive only)
     if ($Interactive) {
         $confirm = Read-Host "Vaciar Papelera de reciclaje? (s/n)"
         if ($confirm -eq "s") {
             Clear-RecycleBin -Force -ErrorAction SilentlyContinue
+            $results += [PSCustomObject]@{ Label = "Papelera de reciclaje"; Status = "OK"; Detail = "Vaciada" }
             Write-Log -Module "TEMP" -Message "Papelera vaciada"
+        } else {
+            $results += [PSCustomObject]@{ Label = "Papelera de reciclaje"; Status = "Skip"; Detail = "Omitida por el usuario" }
         }
     }
 
-    # Summary
     $totalMB = [math]::Round($totalBytes / 1MB, 1)
     Write-Log -Module "TEMP" -Message "Total: ${totalMB} MB liberados en $totalFiles archivos"
+    return $results
+}
+
+function Get-TempCleanerPreview {
+    $items = @()
+
+    $sysPaths = @(
+        @{ Label = "Temp usuario";         Path = $env:TEMP },
+        @{ Label = "Temp Windows";         Path = "C:\Windows\Temp" },
+        @{ Label = "Cache Windows Update"; Path = "C:\Windows\SoftwareDistribution\Download" },
+        @{ Label = "Cache miniaturas";     Path = "$env:LOCALAPPDATA\Microsoft\Windows\Explorer" }
+    )
+
+    foreach ($p in $sysPaths) {
+        if (-not (Test-Path $p.Path)) { continue }
+        $files = Get-ChildItem -Path $p.Path -Recurse -Force -ErrorAction SilentlyContinue |
+            Where-Object { -not $_.PSIsContainer }
+        $count = ($files | Measure-Object).Count
+        $sizeMB = [math]::Round(($files | Measure-Object -Property Length -Sum -ErrorAction SilentlyContinue).Sum / 1MB, 1)
+        $items += [PSCustomObject]@{ Label = $p.Label; Detail = "$count archivos ($sizeMB MB)" }
+    }
+
+    foreach ($path in (Get-BrowserCachePaths)) {
+        $files = Get-ChildItem -Path $path -Recurse -Force -ErrorAction SilentlyContinue |
+            Where-Object { -not $_.PSIsContainer }
+        $count = ($files | Measure-Object).Count
+        $sizeMB = [math]::Round(($files | Measure-Object -Property Length -Sum -ErrorAction SilentlyContinue).Sum / 1MB, 1)
+        $items += [PSCustomObject]@{ Label = "Cache navegador"; Detail = "$count archivos ($sizeMB MB)" }
+    }
+
+    $items += [PSCustomObject]@{ Label = "Papelera de reciclaje"; Detail = "Se pedira confirmacion" }
+    return $items
 }
