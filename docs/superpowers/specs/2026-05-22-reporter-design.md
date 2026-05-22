@@ -13,8 +13,10 @@ Agregar a WinOptimizer un flujo de preview → confirmación → reporte para ca
 ## Criterio de éxito
 
 - Cada opción del menú ([1]-[7]) muestra un preview antes de ejecutar
+- El preview incluye snapshot del sistema (RAM libre, espacio en disco, plan de energía, drivers con problemas)
 - El usuario puede cancelar con "n" sin que se ejecute nada
 - Al finalizar cada operación se muestra un reporte con resultados reales
+- El reporte incluye comparación antes/después de las métricas del sistema
 - El reporte se guarda en `reports\reporte-YYYY-MM-DD-HHmm-[op].txt`
 
 ---
@@ -40,15 +42,21 @@ Agregar a WinOptimizer un flujo de preview → confirmación → reporte para ca
 ```
 [usuario elige opción N]
        ↓
+Get-SystemSnapshot → $snapAntes
+       ↓
 Get-*Preview → array de items pendientes
        ↓
-Show-Preview -Title -Items → muestra preview + "¿Continuar? (s/n)"
+Show-Preview -Title -Items -Snapshot $snapAntes → "¿Continuar? (s/n)"
        ↓ s                         ↓ n
 Ejecutar módulo               Volver al menú (sin ejecutar nada)
        ↓
+Get-SystemSnapshot → $snapDespues
+       ↓
 Recopilar resultados como array de ReportItems
        ↓
-Write-Report -Title -Results → consola + reports\reporte-*.txt
+Write-Report -Title -Results -OpSlug -SnapshotAntes $snapAntes -SnapshotDespues $snapDespues
+       ↓
+consola + reports\reporte-*.txt
 ```
 
 ---
@@ -57,16 +65,35 @@ Write-Report -Title -Results → consola + reports\reporte-*.txt
 
 ### Funciones públicas
 
-**`Show-Preview -Title [string] -Items [array]`**
+**`Get-SystemSnapshot`**
+Captura métricas del sistema en el momento de la llamada. Sin parámetros. Devuelve:
+```powershell
+[PSCustomObject]@{
+    RAMLibreMB       = [int]          # MB de RAM física disponible
+    DiscoLibreGB     = [float]        # GB libres en C:
+    PlanEnergia      = [string]       # Nombre del plan activo
+    DriversConError  = [int]          # Cantidad de dispositivos con estado Error/Unknown/Degraded
+    Timestamp        = [datetime]     # Momento de la captura
+}
+```
+Se llama una vez antes de ejecutar y una vez después. La diferencia se muestra en el reporte.
+
+**`Show-Preview -Title [string] -Items [array] -Snapshot [PSCustomObject]`**
 - Muestra encabezado `=== PREVIEW — $Title ===`
-- Lista cada item con etiqueta y detalle
+- Muestra sección "Estado actual del sistema" con el snapshot (RAM libre, disco libre, plan de energía, drivers con error)
+- Lista cada item con etiqueta y detalle de lo que se va a hacer
 - Pregunta `¿Continuar? (s/n)`
 - Devuelve `$true` si el usuario escribe "s", `$false` para cualquier otra entrada
 
-**`Write-Report -Title [string] -Results [array] -OpSlug [string]`**
+**`Write-Report -Title [string] -Results [array] -OpSlug [string] -SnapshotAntes [PSCustomObject] -SnapshotDespues [PSCustomObject]`**
 - Muestra encabezado `=== REPORTE — $Title ===` con fecha/hora
 - Lista cada resultado con ✓ (OK), ✗ (Error) o ⚠ (Skip)
 - Muestra totales si el módulo los provee
+- Muestra sección "Mejoras del sistema" comparando SnapshotAntes vs SnapshotDespues:
+  - RAM libre: +X MB
+  - Espacio en disco: +X GB
+  - Plan de energía: Equilibrado → Alto Rendimiento
+  - Drivers con error: N → M
 - Crea `$global:WO_Root\reports\` si no existe
 - Guarda en `reports\reporte-YYYY-MM-DD-HHmm-$OpSlug.txt`
 - Loguea vía Write-Log la ruta del archivo guardado
@@ -110,6 +137,12 @@ Devuelve items con formato `{ Label = "Plan de energía"; Detail = "Actual: Equi
 ```
 === PREVIEW — Limpiar archivos temporales ===
 
+  Estado actual del sistema:
+    RAM libre:          3.2 GB
+    Espacio en disco:   45.8 GB libres en C:
+    Plan de energía:    Equilibrado
+    Drivers con error:  2
+
   Se BORRARÁN los siguientes archivos:
     • C:\Users\mgavi\AppData\Local\Temp    → 234 archivos (1.2 GB)
     • C:\Windows\Temp                      → 45 archivos (230 MB)
@@ -133,6 +166,12 @@ Fecha: 2026-05-22 10:32:15
   ✓ Cache Edge                           → 89 archivos eliminados (450 MB)
 
   TOTAL: 1.65 GB liberados en 368 archivos
+
+  Mejoras del sistema:
+    RAM libre:          3.2 GB  →  3.4 GB   (+200 MB)
+    Espacio en disco:   45.8 GB →  47.5 GB  (+1.65 GB)
+    Plan de energía:    Equilibrado (sin cambios en esta operación)
+    Drivers con error:  2 (sin cambios en esta operación)
 
 Guardado en: reports\reporte-2026-05-22-1032-temps.txt
 ```
