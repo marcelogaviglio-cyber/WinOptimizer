@@ -1,19 +1,59 @@
 function Get-DriverUpdatePreview {
-    $problematic = Get-PnpDevice -ErrorAction SilentlyContinue |
-        Where-Object { $_.Status -in @("Error", "Unknown", "Degraded") }
+    $realProblems = Get-PnpDevice -ErrorAction SilentlyContinue |
+        Where-Object { $_.Status -in @("Error", "Degraded") }
 
-    if ($problematic.Count -eq 0) {
-        return @([PSCustomObject]@{
-            Label  = "Estado de drivers"
-            Detail = "No se detectaron dispositivos con problemas"
-        })
-    }
+    $unknownCount = (Get-PnpDevice -ErrorAction SilentlyContinue |
+        Where-Object { $_.Status -eq "Unknown" } | Measure-Object).Count
 
     $items = @()
-    foreach ($dev in $problematic) {
+
+    # Informacional: Unknown no implica error real
+    if ($unknownCount -gt 0) {
         $items += [PSCustomObject]@{
-            Label  = if ($dev.FriendlyName) { $dev.FriendlyName } else { $dev.InstanceId }
-            Detail = "Estado: $($dev.Status) — se intentara actualizar"
+            Label  = "Dispositivos con estado 'Unknown'"
+            Detail = "$unknownCount encontrados — estado normal para dispositivos virtuales, se omiten"
+        }
+    }
+
+    if ($realProblems.Count -eq 0) {
+        $items += [PSCustomObject]@{
+            Label  = "Dispositivos con error real (Error/Degraded)"
+            Detail = "Ninguno — no se requiere accion"
+        }
+        return $items
+    }
+
+    # Advertencia de riesgos antes de listar dispositivos a reinstalar
+    $items += [PSCustomObject]@{
+        Label  = "ADVERTENCIA — Riesgos de reinstalacion de drivers"
+        Detail = ""
+    }
+    $items += [PSCustomObject]@{
+        Label  = "  Riesgo 1"
+        Detail = "El dispositivo puede dejar de responder temporalmente durante la actualizacion"
+    }
+    $items += [PSCustomObject]@{
+        Label  = "  Riesgo 2"
+        Detail = "Puede requerirse reinicio del sistema para que el nuevo driver surta efecto"
+    }
+    $items += [PSCustomObject]@{
+        Label  = "  Riesgo 3"
+        Detail = "En casos raros, el nuevo driver puede ser incompatible — restaurar con Restaurar sistema si ocurre"
+    }
+    $items += [PSCustomObject]@{
+        Label  = "  Riesgo 4"
+        Detail = "Si el driver no esta en Windows Update, el intento fallara sin danos — es esperado"
+    }
+
+    $items += [PSCustomObject]@{
+        Label  = "Dispositivos a reinstalar ($($realProblems.Count))"
+        Detail = ""
+    }
+    foreach ($dev in $realProblems) {
+        $name = if ($dev.FriendlyName) { $dev.FriendlyName } else { $dev.InstanceId }
+        $items += [PSCustomObject]@{
+            Label  = "  $name"
+            Detail = "Estado: $($dev.Status) — se intentara Update-PnpDevice"
         }
     }
     return $items
@@ -23,33 +63,60 @@ function Invoke-DriverUpdate {
     $results = @()
     Write-Log -Module "DRIVERS" -Message "Escaneando dispositivos..."
 
-    $problematic = Get-PnpDevice -ErrorAction SilentlyContinue |
-        Where-Object { $_.Status -in @("Error", "Unknown", "Degraded") }
+    # Solo Error y Degraded son problemas reales — Unknown es normal para dispositivos virtuales
+    $realProblems = Get-PnpDevice -ErrorAction SilentlyContinue |
+        Where-Object { $_.Status -in @("Error", "Degraded") }
 
-    if ($problematic.Count -eq 0) {
-        Write-Log -Module "DRIVERS" -Message "No se detectaron dispositivos con problemas"
-        $results += [PSCustomObject]@{ Label = "Escaneo de dispositivos"; Status = "OK"; Detail = "Sin dispositivos con problemas" }
-    } else {
-        foreach ($dev in $problematic) {
-            $name = if ($dev.FriendlyName) { $dev.FriendlyName } else { $dev.InstanceId }
-            Write-Log -Module "DRIVERS" -Message "Dispositivo con problema: $name [$($dev.Status)]"
-            $results += [PSCustomObject]@{ Label = $name; Status = "Error"; Detail = "Estado: $($dev.Status)" }
+    $unknownCount = (Get-PnpDevice -ErrorAction SilentlyContinue |
+        Where-Object { $_.Status -eq "Unknown" } | Measure-Object).Count
+
+    if ($unknownCount -gt 0) {
+        Write-Log -Module "DRIVERS" -Message "Dispositivos Unknown (virtuales, omitidos): $unknownCount"
+        $results += [PSCustomObject]@{
+            Label  = "Dispositivos Unknown omitidos"
+            Status = "Skip"
+            Detail = "$unknownCount dispositivos virtuales con estado normal — no requieren accion"
         }
     }
 
-    Write-Log -Module "DRIVERS" -Message "Iniciando escaneo de drivers via Windows Update..."
-    $scanOutput = & pnputil /scan-devices 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        Write-Log -Module "DRIVERS" -Message "[FALLO] pnputil fallo con codigo $LASTEXITCODE | $($scanOutput -join ' ')"
-        $results += [PSCustomObject]@{ Label = "pnputil /scan-devices"; Status = "Error"; Detail = "Fallo con codigo $LASTEXITCODE" }
+    if ($realProblems.Count -eq 0) {
+        Write-Log -Module "DRIVERS" -Message "No se detectaron dispositivos con Error o Degraded"
+        $results += [PSCustomObject]@{ Label = "Escaneo de dispositivos"; Status = "OK"; Detail = "Sin dispositivos con Error o Degraded" }
     } else {
-        Write-Log -Module "DRIVERS" -Message "pnputil: $($scanOutput -join ' ')"
-        $results += [PSCustomObject]@{ Label = "pnputil /scan-devices"; Status = "OK"; Detail = "Escaneo completado" }
+        Write-Log -Module "DRIVERS" -Message "$($realProblems.Count) dispositivos con Error/Degraded — intentando actualizar..."
+
+        foreach ($dev in $realProblems) {
+            $name = if ($dev.FriendlyName) { $dev.FriendlyName } else { $dev.InstanceId }
+            Write-Log -Module "DRIVERS" -Message "Actualizando: $name [$($dev.Status)]"
+
+            try {
+                Update-PnpDevice -InstanceId $dev.InstanceId -Confirm:$false -ErrorAction Stop
+                Write-Log -Module "DRIVERS" -Message "Actualizado: $name"
+                $results += [PSCustomObject]@{
+                    Label  = $name
+                    Status = "OK"
+                    Detail = "Driver actualizado correctamente"
+                }
+            } catch {
+                Write-Log -Module "DRIVERS" -Message "Sin driver disponible para: $name | $($_.Exception.Message)"
+                $results += [PSCustomObject]@{
+                    Label  = $name
+                    Status = "Skip"
+                    Detail = "Sin driver disponible en Windows Update — requiere driver del fabricante"
+                }
+            }
+        }
     }
 
-    $updated = Get-PnpDevice -ErrorAction SilentlyContinue |
-        Where-Object { $_.Status -eq "OK" -and $_.Present -eq $true }
-    Write-Log -Module "DRIVERS" -Message "Escaneo completado. Dispositivos OK: $($updated.Count)"
+    # Escaneo general para detectar actualizaciones pendientes
+    Write-Log -Module "DRIVERS" -Message "Escaneo general via Windows Update..."
+    $scanOutput = & pnputil /scan-devices 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Log -Module "DRIVERS" -Message "[FALLO] pnputil fallo con codigo $LASTEXITCODE"
+        $results += [PSCustomObject]@{ Label = "pnputil /scan-devices"; Status = "Error"; Detail = "Fallo con codigo $LASTEXITCODE" }
+    } else {
+        $results += [PSCustomObject]@{ Label = "pnputil /scan-devices"; Status = "OK"; Detail = "Escaneo completado" }
+    }
 
     return $results
 }
