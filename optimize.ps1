@@ -13,6 +13,7 @@ if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir | Out
 $global:WO_LogFile = Join-Path $logDir "optimize-$(Get-Date -Format 'yyyy-MM-dd').log"
 
 . "$PSScriptRoot\modules\logger.ps1"
+. "$PSScriptRoot\modules\reporter.ps1"
 . "$PSScriptRoot\modules\backup.ps1"
 . "$PSScriptRoot\modules\temp-cleaner.ps1"
 . "$PSScriptRoot\modules\drivers.ps1"
@@ -39,19 +40,81 @@ Write-Log -Module "INIT" -Message "WinOptimizer iniciado"
 do {
     $choice = Show-Menu
     switch ($choice) {
-        "1" { Invoke-TempCleaner -Interactive $true }
-        "2" { Invoke-DriverUpdate }
-        "3" { Invoke-RegistryFix -Level 1 }
-        "4" { Invoke-RegistryFix -Level 2 }
-        "5" { Invoke-RegistryFix -Level 3 }
-        "6" { Invoke-HardwareOptimize }
+        "1" {
+            $snap = Get-SystemSnapshot
+            if (Show-Preview -Title "Limpiar archivos temporales" -Items (Get-TempCleanerPreview) -Snapshot $snap) {
+                $results = Invoke-TempCleaner -Interactive $true
+                Write-Report -Title "Limpiar archivos temporales" -Results $results `
+                    -OpSlug "temps" -SnapshotAntes $snap -SnapshotDespues (Get-SystemSnapshot)
+            }
+        }
+        "2" {
+            $snap = Get-SystemSnapshot
+            if (Show-Preview -Title "Actualizar drivers" -Items (Get-DriverUpdatePreview) -Snapshot $snap) {
+                $results = Invoke-DriverUpdate
+                Write-Report -Title "Actualizar drivers" -Results $results `
+                    -OpSlug "drivers" -SnapshotAntes $snap -SnapshotDespues (Get-SystemSnapshot)
+            }
+        }
+        "3" {
+            $snap = Get-SystemSnapshot
+            if (Show-Preview -Title "Registro Nivel 1 Conservador" -Items (Get-RegistryPreview -Level 1) -Snapshot $snap) {
+                $results = Invoke-RegistryFix -Level 1
+                Write-Report -Title "Registro Nivel 1 Conservador" -Results $results `
+                    -OpSlug "reg-L1" -SnapshotAntes $snap -SnapshotDespues (Get-SystemSnapshot)
+            }
+        }
+        "4" {
+            $snap = Get-SystemSnapshot
+            if (Show-Preview -Title "Registro Nivel 2 Moderado" -Items (Get-RegistryPreview -Level 2) -Snapshot $snap) {
+                $results = Invoke-RegistryFix -Level 2
+                Write-Report -Title "Registro Nivel 2 Moderado" -Results $results `
+                    -OpSlug "reg-L2" -SnapshotAntes $snap -SnapshotDespues (Get-SystemSnapshot)
+            }
+        }
+        "5" {
+            $snap = Get-SystemSnapshot
+            if (Show-Preview -Title "Registro Nivel 3 Agresivo" -Items (Get-RegistryPreview -Level 3) -Snapshot $snap) {
+                $results = Invoke-RegistryFix -Level 3
+                Write-Report -Title "Registro Nivel 3 Agresivo" -Results $results `
+                    -OpSlug "reg-L3" -SnapshotAntes $snap -SnapshotDespues (Get-SystemSnapshot)
+            }
+        }
+        "6" {
+            $snap = Get-SystemSnapshot
+            if (Show-Preview -Title "Aceleracion de hardware" -Items (Get-HardwarePreview) -Snapshot $snap) {
+                $results = Invoke-HardwareOptimize
+                Write-Report -Title "Aceleracion de hardware" -Results $results `
+                    -OpSlug "hardware" -SnapshotAntes $snap -SnapshotDespues (Get-SystemSnapshot)
+            }
+        }
         "7" {
-            Invoke-TempCleaner -Interactive $false
-            Invoke-DriverUpdate
-            Invoke-RegistryFix -Level 1
-            Invoke-RegistryFix -Level 2
-            Invoke-RegistryFix -Level 3
-            Invoke-HardwareOptimize
+            $snap = Get-SystemSnapshot
+            $allItems = @(
+                [PSCustomObject]@{ Label = "--- TEMPORALES ---"; Detail = "" }
+            ) + (Get-TempCleanerPreview) + @(
+                [PSCustomObject]@{ Label = "--- DRIVERS ---"; Detail = "" }
+            ) + (Get-DriverUpdatePreview) + @(
+                [PSCustomObject]@{ Label = "--- REGISTRO L1 ---"; Detail = "" }
+            ) + (Get-RegistryPreview -Level 1) + @(
+                [PSCustomObject]@{ Label = "--- REGISTRO L2 ---"; Detail = "" }
+            ) + (Get-RegistryPreview -Level 2) + @(
+                [PSCustomObject]@{ Label = "--- REGISTRO L3 ---"; Detail = "" }
+            ) + (Get-RegistryPreview -Level 3) + @(
+                [PSCustomObject]@{ Label = "--- HARDWARE ---"; Detail = "" }
+            ) + (Get-HardwarePreview)
+
+            if (Show-Preview -Title "Ejecutar todo" -Items $allItems -Snapshot $snap) {
+                $allResults = @()
+                $allResults += Invoke-TempCleaner -Interactive $false
+                $allResults += Invoke-DriverUpdate
+                $allResults += Invoke-RegistryFix -Level 1
+                $allResults += Invoke-RegistryFix -Level 2
+                $allResults += Invoke-RegistryFix -Level 3
+                $allResults += Invoke-HardwareOptimize
+                Write-Report -Title "Ejecutar todo" -Results $allResults `
+                    -OpSlug "todo" -SnapshotAntes $snap -SnapshotDespues (Get-SystemSnapshot)
+            }
         }
         "0" { Write-Log -Module "INIT" -Message "WinOptimizer finalizado" }
         default { Write-Host "Opcion invalida. Intenta de nuevo." -ForegroundColor Red }
