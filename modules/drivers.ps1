@@ -90,6 +90,7 @@ function Invoke-DriverUpdate {
             Write-Log -Module "DRIVERS" -Message "Actualizando: $name [$($dev.Status)]"
 
             try {
+                Import-Module PnpDevice -ErrorAction Stop
                 Update-PnpDevice -InstanceId $dev.InstanceId -Confirm:$false -ErrorAction Stop
                 Write-Log -Module "DRIVERS" -Message "Actualizado: $name"
                 $results += [PSCustomObject]@{
@@ -98,11 +99,17 @@ function Invoke-DriverUpdate {
                     Detail = "Driver actualizado correctamente"
                 }
             } catch {
-                Write-Log -Module "DRIVERS" -Message "Sin driver disponible para: $name | $($_.Exception.Message)"
+                $errMsg = $_.Exception.Message
+                $detail = if ($errMsg -match "not recognized|no se reconoce") {
+                    "Modulo PnpDevice no disponible en este sistema — instalar driver manualmente"
+                } else {
+                    "Sin driver disponible en Windows Update — instalar driver del fabricante"
+                }
+                Write-Log -Module "DRIVERS" -Message "No se pudo actualizar: $name | $errMsg"
                 $results += [PSCustomObject]@{
                     Label  = $name
                     Status = "Skip"
-                    Detail = "Sin driver disponible en Windows Update — requiere driver del fabricante"
+                    Detail = $detail
                 }
             }
         }

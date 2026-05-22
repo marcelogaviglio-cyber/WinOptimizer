@@ -9,7 +9,7 @@ function Get-SystemSnapshot {
     $planName = if ($planOutput -match '\((.+)\)') { $Matches[1] } else { "Desconocido" }
 
     $driversConError = (Get-PnpDevice -ErrorAction SilentlyContinue |
-        Where-Object { $_.Status -in @("Error", "Unknown", "Degraded") } |
+        Where-Object { $_.Status -in @("Error", "Degraded") } |
         Measure-Object).Count
 
     return [PSCustomObject]@{
